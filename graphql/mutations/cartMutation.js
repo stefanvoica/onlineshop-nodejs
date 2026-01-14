@@ -1,36 +1,55 @@
 const graphql = require("graphql");
 const { GraphQLNonNull } = graphql;
+
 const CartType = require("../types/CartType");
 const AddToCartInput = require("../inputs/AddToCartInput");
 const UpdateCartItemInput = require("../inputs/UpdateCartItemInput");
+
 const { Cart, CartItem, Product } = require("../../models");
 
 const addToCart = {
-  type: CartType,
+  type: CartType, // returneaza un CartType
   args: {
     input: { type: new GraphQLNonNull(AddToCartInput) },
   },
   async resolve(_, { input }, context) {
-    if (!context.user) throw new Error("Unauthorized");
+    if (!context.user) {
+      throw new Error("Unauthorized");
+    }
 
     const { productId, quantity } = input;
     const userId = context.user.id;
 
     const product = await Product.findByPk(productId);
-    if (!product) throw new Error("Product not found");
+    if (!product) {
+      throw new Error("Product not found");
+    }
 
     let cart = await Cart.findOne({ where: { userId } });
-    if (!cart) cart = await Cart.create({ userId });
+    if (!cart) {
+      cart = await Cart.create({ userId });
+    }
 
     const item = await CartItem.findOne({
       where: { cartId: cart.id, productId },
     });
 
+    const existingQty = item ? item.quantity : 0;
+    const newQty = existingQty + quantity;
+
+    if (newQty > product.stock) {
+      throw new Error(`Stoc insuficient. Disponibil: ${product.stock}`);
+    }
+
     if (item) {
-      item.quantity += quantity;
+      item.quantity = newQty;
       await item.save();
     } else {
-      await CartItem.create({ cartId: cart.id, productId, quantity });
+      await CartItem.create({
+        cartId: cart.id,
+        productId,
+        quantity,
+      });
     }
 
     const updated = await Cart.findOne({
@@ -58,22 +77,38 @@ const updateCartItem = {
     input: { type: new GraphQLNonNull(UpdateCartItemInput) },
   },
   async resolve(_, { input }, context) {
-    if (!context.user) throw new Error("Unauthorized");
+    if (!context.user) {
+      throw new Error("Unauthorized");
+    }
 
     const { productId, quantity } = input;
     const userId = context.user.id;
 
     const cart = await Cart.findOne({ where: { userId } });
-    if (!cart) return { items: [], totalValue: 0 };
+    if (!cart) {
+      return { items: [], totalValue: 0 };
+    }
 
     const item = await CartItem.findOne({
       where: { cartId: cart.id, productId },
     });
 
-    if (!item) throw new Error("Product not in cart");
+    if (!item) {
+      throw new Error("Product not in cart");
+    }
 
-    if (quantity === 0) await item.destroy();
-    else {
+    const product = await Product.findByPk(productId);
+    if (!product) {
+      throw new Error("Product not found");
+    }
+
+    if (quantity > product.stock) {
+      throw new Error(`Stoc insuficient. Disponibil: ${product.stock}`);
+    }
+
+    if (quantity === 0) {
+      await item.destroy();
+    } else {
       item.quantity = quantity;
       await item.save();
     }
